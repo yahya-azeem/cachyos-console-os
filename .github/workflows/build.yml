@@ -47,7 +47,7 @@ jobs:
           DOWNLOAD_URL=$(curl -s https://api.github.com/repos/mmatyas/pegasus-frontend/releases/tags/continuous | grep -oE 'https://github.com/mmatyas/pegasus-frontend/releases/download/continuous/pegasus-fe_[^"]+_x11-static.zip' | head -n 1)
           echo "Download URL: $DOWNLOAD_URL"
           curl -L -o pegasus.zip "$DOWNLOAD_URL"
-          unzip pegasus.zip
+          unzip -o pegasus.zip pegasus-fe
           mkdir -p archiso/airootfs/usr/local/bin
           cp pegasus-fe archiso/airootfs/usr/local/bin/
           chmod +x archiso/airootfs/usr/local/bin/pegasus-fe
