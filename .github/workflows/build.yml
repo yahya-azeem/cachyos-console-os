@@ -1,9 +1,10 @@
-name: Desktop ISO
+name: Console OS ISO
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.ref }}
@@ -15,7 +16,7 @@ jobs:
     container:
       image: archlinux:base-devel
       options: --privileged
-    name: Build
+    name: Build Console ISO
     outputs:
       builddate: ${{ steps.date.outputs.builddate }}
     steps:
@@ -24,115 +25,75 @@ jobs:
         run: |
           echo "builddate=$(date +'%y%m%d')" >> $GITHUB_OUTPUT
 
-      - name: Clone CachyOS-Live-ISO
-        id: clone
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Add CachyOS keyring
-        id: keyring
         run: |
           pacman-key --init
           pacman-key --recv-keys F3B607488DB35A47 --keyserver keyserver.ubuntu.com
           pacman-key --lsign-key F3B607488DB35A47
-
           sed -i '/^\[core\]$/i[cachyos]\nServer = https://mirror.cachyos.org/repo/$arch/$repo\n' /etc/pacman.conf
 
       - name: Install dependencies
-        id: dependencies
         run: |
-          sudo pacman -Syu --noconfirm archiso cachyos-keyring mkinitcpio-archiso squashfs-tools grub
+          sudo pacman -Syu --noconfirm archiso cachyos-keyring mkinitcpio-archiso squashfs-tools grub limine xorriso git unzip curl
+
+      - name: Download Pegasus Frontend
+        run: |
+          echo "Fetching latest continuous Pegasus Linux release..."
+          DOWNLOAD_URL=$(curl -s https://api.github.com/repos/mmatyas/pegasus-frontend/releases/tags/continuous | grep -oE 'https://github.com/mmatyas/pegasus-frontend/releases/download/continuous/pegasus-fe_[^"]+_x11-static.zip' | head -n 1)
+          echo "Download URL: $DOWNLOAD_URL"
+          curl -L -o pegasus.zip "$DOWNLOAD_URL"
+          unzip pegasus.zip
+          mkdir -p archiso/airootfs/usr/local/bin
+          cp pegasus-fe archiso/airootfs/usr/local/bin/
+          chmod +x archiso/airootfs/usr/local/bin/pegasus-fe
+
+      - name: Clone ProsperoOS theme
+        run: |
+          echo "Cloning prosperoOS theme..."
+          mkdir -p archiso/airootfs/etc/skel/.config/pegasus-frontend/themes/prosperoOS
+          git clone https://github.com/PlayingKarrde/prosperoOS.git archiso/airootfs/etc/skel/.config/pegasus-frontend/themes/prosperoOS
 
       - name: Create build user
-        id: user-archiso
         run: |
           useradd builder -m
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chmod -R a+rw .
 
-      - name: Build ISO (${{ steps.date.outputs.builddate }})
-        id: build
+      - name: Build ISO
         run: |
-          sudo -H -E -u builder ./buildiso.sh
+          sudo -H -E -u builder ./build-limine-iso.sh -v
 
       - name: Upload ISO to artifacts
-        id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: cachyos-desktop-linux-${{ steps.date.outputs.builddate }}
-          path: out/desktop/*
-  quicktest:
-    name: Testing (${{ matrix.bootloader }} / ${{ matrix.filesystem }})
-    runs-on: ubuntu-latest
+          name: cachyos-console-os-${{ steps.date.outputs.builddate }}
+          path: out/limine/*.iso
+
+  release:
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     needs: build
-    container:
-      image: archlinux:base-devel
-      options: --privileged
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        bootloader: [grub, systemd-boot, refind, limine]
-        filesystem: [btrfs, xfs, ext4, f2fs, zfs]
+    runs-on: ubuntu-latest
     steps:
-      - name: Clone CachyOS-Live-ISO
-        id: clone
-        uses: actions/checkout@v6
-
-      - name: Install dependencies
-        id: dependencies
-        run: |
-          pacman -Syu --noconfirm git ffmpeg imagemagick tesseract-data-eng qemu-desktop
-
-      - name: Create build user
-        id: user
-        run: |
-          useradd builder -m
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chmod -R a+rw .
-
-      - name: Build quickemu
-        id: quickemu
-        run: |
-          sudo -u builder git clone https://aur.archlinux.org/quickemu.git
-          cd quickemu
-          sudo -H -E -u builder makepkg --syncdeps --noconfirm
-          pacman -U --noconfirm quickemu*.pkg.tar.zst
-          cd ..
-
-      - name: Clone quicktest
-        id: clone-quicktest
-        uses: actions/checkout@v6
-        with:
-          repository: 'quickemu-project/quicktest'
-          path: 'quicktest'
-
-      - name: Download ISO
-        id: download
+      - name: Download ISO artifact
         uses: actions/download-artifact@v4
         with:
-          path: machines/cachyos-dailylive
-          merge-multiple: true
+          name: cachyos-console-os-${{ needs.build.outputs.builddate }}
 
-      - name: Run quicktest
-        id: quicktest
-        run: |
-          ./quicktest/quicktest test_install_calamares cachyos dailylive
-        env:
-          QT_NOTIFY: "false"
-          QT_OPEN_RESULTS: "false"
-          QT_QUICKGET_SKIP: "true"
-          QT_TESTCASES_DIR: "./testcases"
-          QUICKEMU_DISPLAY: "none"
-          QUICKEMU_VM_DIR: "./machines"
-          TEST_BOOTLOADER: "${{ matrix.bootloader }}"
-          TEST_FILESYSTEM: "${{ matrix.filesystem }}"
-
-      - name: Upload results to artifacts
-        id: upload-results
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: cachyos-desktop-linux-results-${{needs.build.outputs.builddate}}-${{ matrix.bootloader }}-${{ matrix.filesystem }}
-          path: results/*
+          tag_name: v${{ needs.build.outputs.builddate }}
+          name: Release v${{ needs.build.outputs.builddate }}
+          body: |
+            CachyOS Console OS (Limine + Pegasus Frontend + ProsperoOS Theme)
+            Built on ${{ needs.build.outputs.builddate }}
+          files: |
+            *.iso
+            *.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

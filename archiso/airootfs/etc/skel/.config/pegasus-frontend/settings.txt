@@ -1,0 +1,3 @@
+general.theme: prosperoOS
+general.fullscreen: true
+general.input-mouse-support: false
