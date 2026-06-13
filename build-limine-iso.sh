@@ -274,7 +274,7 @@ phase2_assemble() {
     local iso_label=""
     if [[ -f "${ARCHISO_PROFILE}/profiledef.sh" ]]; then
         # Source profiledef.sh in a subshell to extract iso_label
-        iso_label=$(bash -c "source '${ARCHISO_PROFILE}/profiledef.sh' 2>/dev/null; echo \"\$iso_label\"")
+        iso_label=$(bash -c "declare -A file_permissions; source '${ARCHISO_PROFILE}/profiledef.sh' 2>/dev/null; echo \"\$iso_label\"")
     fi
     if [[ -z "$iso_label" ]]; then
         iso_label="COS_$(date +%Y%m)"
